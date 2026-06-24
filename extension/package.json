@@ -1,0 +1,28 @@
+{
+  "name": "sentinelai-guardian-extension",
+  "displayName": "SentinelAI Guardian — Web3 Antivirus",
+  "version": "0.1.0",
+  "description": "Stop blind signing. The AI antivirus for Web3 — intercepts transactions, scans sites, and explains risk before you sign.",
+  "private": true,
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "plasmo": "0.90.5",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.0.258",
+    "@types/react": "18.2.48",
+    "@types/react-dom": "18.2.18",
+    "typescript": "5.7.3"
+  },
+  "manifest": {
+    "name": "SentinelAI Guardian",
+    "permissions": ["storage", "alarms", "tabs", "scripting", "clipboardRead", "notifications"],
+    "host_permissions": ["http://*/*", "https://*/*"]
+  }
+}
