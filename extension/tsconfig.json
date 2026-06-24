@@ -6,6 +6,6 @@
     "paths": {
       "~*": ["./*"]
     },
-    "baseUrl": "."
+    "moduleResolution": "bundler"
   }
 }
