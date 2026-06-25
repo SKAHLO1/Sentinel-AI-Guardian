@@ -158,6 +158,48 @@ describe("wallet health scoring", () => {
   })
 })
 
+describe("signature decoding", () => {
+  it("flags an unlimited Permit2 signature as critical", async () => {
+    const { decodeTypedData } = await import("@/lib/engine/signature")
+    const td = {
+      domain: { name: "Permit2", verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3" },
+      primaryType: "PermitSingle",
+      message: {
+        details: { token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", amount: ((1n << 160n) - 1n).toString(), expiration: "0", nonce: "0" },
+        spender: "0xdef1c0ded9bec7f1a1670819833240f027b25eff",
+        sigDeadline: "0",
+      },
+    }
+    const d = decodeTypedData(td)
+    expect(d?.kind).toBe("permit2")
+    expect(d?.unlimited).toBe(true)
+    expect(d?.signals[0].severity).toBe("critical")
+  })
+
+  it("flags a zero-consideration Seaport listing", async () => {
+    const { decodeTypedData } = await import("@/lib/engine/signature")
+    const td = {
+      domain: { name: "Seaport" },
+      primaryType: "OrderComponents",
+      message: { offer: [{ token: "0xnft" }], consideration: [{ startAmount: "0" }] },
+    }
+    const d = decodeTypedData(td)
+    expect(d?.kind).toBe("seaport")
+    expect(d?.signals[0].severity).toBe("critical")
+  })
+
+  it("raises risk when typedData is passed to analyzeTransaction", () => {
+    const td = {
+      domain: { name: "Permit2", verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3" },
+      primaryType: "PermitSingle",
+      message: { details: { token: "0xa0b8", amount: ((1n << 160n) - 1n).toString() }, spender: "0xdef1c0ded9bec7f1a1670819833240f027b25eff" },
+    }
+    const r = analyzeTransaction({ method: "eth_signTypedData_v4", typedData: td })
+    expect(r.verdict).toBe("danger")
+    expect(r.signals.some((s) => s.id === "permit2-sig")).toBe(true)
+  })
+})
+
 describe("copilot fallback", () => {
   it("explains a pasted unlimited approval with a reject recommendation", () => {
     const out = fallbackExplain("is this safe?", { data: UNLIMITED_APPROVE })

@@ -46,7 +46,12 @@ export interface AnalysisRequest {
     | "eth_sign"
     | "personal_sign"
     | "eth_signTypedData"
+    | "eth_signTypedData_v3"
     | "eth_signTypedData_v4"
+  /** Raw EIP-712 typed-data payload (string or object) for signature requests. */
+  typedData?: unknown
+  /** Optional contract reputation (verified source?) for the `to` address. */
+  reputation?: { verified: boolean; name?: string }
   chainId?: number
 }
 

@@ -81,6 +81,21 @@ async function load(): Promise<FeedCache> {
     /* source optional */
   }
 
+  // Community-reported threats (DynamoDB) — fold into the blocklists.
+  try {
+    const { getReports } = await import("./db")
+    const reports = await getReports(200)
+    if (reports.length) {
+      for (const r of reports) {
+        if (r.type === "domain") phishingDomains.add(r.value)
+        else scamAddresses.add(r.value)
+      }
+      if (!sources.includes("Community reports")) sources.push("Community reports")
+    }
+  } catch {
+    /* db optional */
+  }
+
   cache = {
     phishingDomains,
     scamAddresses,

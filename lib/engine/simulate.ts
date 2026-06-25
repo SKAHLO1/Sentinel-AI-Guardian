@@ -25,6 +25,8 @@ export interface SimulationReport {
   gasEstimateUsd: number
   gasUnits: number
   assetChanges: AssetChange[]
+  /** True when assetChanges came from a real on-chain simulation (Alchemy). */
+  live?: boolean
   approvalScope: {
     isApproval: boolean
     unlimited: boolean
