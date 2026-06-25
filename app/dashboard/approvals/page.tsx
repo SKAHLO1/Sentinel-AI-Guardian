@@ -7,7 +7,7 @@ export default function ApprovalsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Topbar title="Approval Manager" subtitle="Review and revoke all token approvals across your wallets" />
-      <div className="pt-14 p-4 md:p-6">
+      <div className="pt-14 px-4 md:px-6 pb-6">
         <ApprovalManager />
       </div>
     </div>

@@ -42,8 +42,8 @@ export function Sidebar() {
       <aside
         className={cn(
           "fixed left-0 top-0 h-full w-60 z-50 flex flex-col bg-[#0D1117] border-r border-white/[0.06] transition-transform duration-200",
-          "md:translate-x-0",
-          open ? "translate-x-0" : "-translate-x-full",
+          "md:translate-x-0 md:pointer-events-auto",
+          open ? "translate-x-0" : "-translate-x-full pointer-events-none",
         )}
       >
         {/* Logo */}
@@ -62,7 +62,7 @@ export function Sidebar() {
         </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {navItems.map(({ icon: Icon, label, href }) => {
           const active = pathname === href || (href !== "/dashboard" && pathname?.startsWith(href))
           return (
