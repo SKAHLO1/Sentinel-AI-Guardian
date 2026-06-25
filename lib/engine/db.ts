@@ -128,6 +128,49 @@ export async function queryScanEvents(
   return (res.Items ?? []) as ScanEvent[]
 }
 
+export interface ThreatReport {
+  type: "domain" | "address"
+  value: string
+  reason?: string
+  count: number
+  lastReportedAt: string
+}
+
+/** Record a user threat report, aggregating repeats by (type,value). */
+export async function putReport(r: { type: "domain" | "address"; value: string; reason?: string }): Promise<void> {
+  if (!isDbConfigured()) return
+  const { UpdateCommand } = await import("@aws-sdk/lib-dynamodb")
+  const doc = await getDoc()
+  const value = r.value.trim().toLowerCase()
+  await doc.send(
+    new UpdateCommand({
+      TableName: tableName(),
+      Key: { pk: "REPORT", sk: `${r.type}#${value}` },
+      UpdateExpression: "SET #t = :t, #v = :v, #r = :reason, #l = :now ADD #c :one",
+      ExpressionAttributeNames: { "#t": "type", "#v": "value", "#r": "reason", "#l": "lastReportedAt", "#c": "count" },
+      ExpressionAttributeValues: { ":t": r.type, ":v": value, ":reason": r.reason ?? "", ":now": new Date().toISOString(), ":one": 1 },
+    }),
+  )
+}
+
+/** Recent community threat reports, newest first. */
+export async function getReports(limit = 50): Promise<ThreatReport[]> {
+  if (!isDbConfigured()) return []
+  const { QueryCommand } = await import("@aws-sdk/lib-dynamodb")
+  const doc = await getDoc()
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: tableName(),
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: { ":pk": "REPORT" },
+      Limit: limit,
+    }),
+  )
+  return ((res.Items ?? []) as any[])
+    .map((i) => ({ type: i.type, value: i.value, reason: i.reason, count: i.count ?? 1, lastReportedAt: i.lastReportedAt }))
+    .sort((a, b) => (b.lastReportedAt || "").localeCompare(a.lastReportedAt || ""))
+}
+
 /** Delete a wallet's stored history (used by the "clear" action). */
 export async function clearScanEvents(address: string): Promise<number> {
   if (!isDbConfigured() || !address) return 0
