@@ -11,6 +11,7 @@ import type {
 import { decodeCalldata, shortenAddress } from "./calldata"
 import { lookupAddress, lookupSelector, lookupDomain } from "./threat-intel"
 import { analyzeDomain } from "./domains"
+import { decodeTypedData } from "./signature"
 
 const SEVERITY_BASE: Record<RiskSignal["severity"], number> = {
   critical: 45,
@@ -121,14 +122,33 @@ export function analyzeTransaction(req: AnalysisRequest): AnalysisResult {
       category: "signing",
     })
   }
-  if (req.method === "eth_signTypedData" || req.method === "eth_signTypedData_v4") {
-    signals.push({
-      id: "typed-data",
-      message: "Off-chain typed-data signature — may be a Permit/Permit2 approval that grants token access without an on-chain tx",
-      severity: "medium",
-      weight: SEVERITY_BASE.medium,
-      category: "signing",
-    })
+  if (req.method === "eth_signTypedData" || req.method === "eth_signTypedData_v3" || req.method === "eth_signTypedData_v4") {
+    // Decode the actual typed data (Permit / Permit2 / Seaport) when present.
+    const sig = req.typedData != null ? decodeTypedData(req.typedData) : null
+    if (sig) {
+      for (const s of sig.signals) signals.push(s)
+      // The signature's spender deserves the same threat-intel check as an
+      // on-chain spender — a Permit/Permit2 grant is just as powerful.
+      const spenderHit = sig.spender ? lookupAddress(sig.spender) : null
+      if (spenderHit && !threats.find((t) => t.value === spenderHit.value)) {
+        threats.push(spenderHit)
+        signals.push({
+          id: `sig-addr-${spenderHit.value.slice(-6)}`,
+          message: `${spenderHit.label} (${shortenAddress(spenderHit.value)})`,
+          severity: spenderHit.severity,
+          weight: SEVERITY_BASE[spenderHit.severity],
+          category: "threat-intel",
+        })
+      }
+    } else {
+      signals.push({
+        id: "typed-data",
+        message: "Off-chain typed-data signature — may be a Permit/Permit2 approval that grants token access without an on-chain tx",
+        severity: "medium",
+        weight: SEVERITY_BASE.medium,
+        category: "signing",
+      })
+    }
   }
 
   // --- Address threat intel ----------------------------------------------
@@ -142,6 +162,19 @@ export function analyzeTransaction(req: AnalysisRequest): AnalysisResult {
         severity: hit.severity,
         weight: SEVERITY_BASE[hit.severity],
         category: "threat-intel",
+      })
+    }
+  }
+
+  // --- Contract reputation (Etherscan) -----------------------------------
+  if (req.reputation && req.data && req.data !== "0x") {
+    if (req.reputation.verified === false) {
+      signals.push({
+        id: "unverified-contract",
+        message: "Contract source is not verified on the block explorer — its code is opaque",
+        severity: "medium",
+        weight: SEVERITY_BASE.medium,
+        category: "reputation",
       })
     }
   }
