@@ -19,6 +19,7 @@ declare global {
 
 interface WalletState {
   address: string | null
+  chainId: number | null
   connecting: boolean
   hasProvider: boolean
   error: string | null
@@ -30,6 +31,7 @@ const WalletContext = createContext<WalletState | null>(null)
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null)
+  const [chainId, setChainId] = useState<number | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [hasProvider, setHasProvider] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,17 +41,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setHasProvider(Boolean(eth))
     if (!eth) return
 
-    // Restore an already-authorized account without prompting.
+    // Restore an already-authorized account + current chain without prompting.
     eth.request({ method: "eth_accounts" })
       .then((accs) => {
         const a = (accs as string[])?.[0]
         if (a) setAddress(a.toLowerCase())
       })
       .catch(() => {})
+    eth.request({ method: "eth_chainId" })
+      .then((id) => setChainId(parseInt(id as string, 16) || null))
+      .catch(() => {})
 
     const onAccounts = (accs: string[]) => setAddress(accs?.[0]?.toLowerCase() ?? null)
+    const onChain = (id: string) => setChainId(parseInt(id, 16) || null)
     eth.on?.("accountsChanged", onAccounts)
-    return () => eth.removeListener?.("accountsChanged", onAccounts)
+    eth.on?.("chainChanged", onChain)
+    return () => {
+      eth.removeListener?.("accountsChanged", onAccounts)
+      eth.removeListener?.("chainChanged", onChain)
+    }
   }, [])
 
   const connect = useCallback(async () => {
@@ -63,6 +73,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     try {
       const accs = (await eth.request({ method: "eth_requestAccounts" })) as string[]
       setAddress(accs?.[0]?.toLowerCase() ?? null)
+      try {
+        const id = (await eth.request({ method: "eth_chainId" })) as string
+        setChainId(parseInt(id, 16) || null)
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       setError((e as Error).message || "Connection rejected")
     } finally {
@@ -70,10 +86,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const disconnect = useCallback(() => setAddress(null), [])
+  const disconnect = useCallback(() => { setAddress(null); setChainId(null) }, [])
 
   return (
-    <WalletContext.Provider value={{ address, connecting, hasProvider, error, connect, disconnect }}>
+    <WalletContext.Provider value={{ address, chainId, connecting, hasProvider, error, connect, disconnect }}>
       {children}
     </WalletContext.Provider>
   )

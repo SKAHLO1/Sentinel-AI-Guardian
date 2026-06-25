@@ -35,15 +35,41 @@ export function isOnchainConfigured(): boolean {
   return Boolean(process.env.ALCHEMY_API_KEY)
 }
 
-function rpcUrl(): string {
-  const key = process.env.ALCHEMY_API_KEY
-  const network = process.env.ALCHEMY_NETWORK || "eth-mainnet"
-  return `https://${network}.g.alchemy.com/v2/${key}`
+// Supported EVM chains. `slug` is the Alchemy network subdomain.
+export interface ChainInfo {
+  id: number
+  slug: string
+  name: string
+  native: string
+  explorer: string
+}
+export const CHAINS: Record<number, ChainInfo> = {
+  1: { id: 1, slug: "eth-mainnet", name: "Ethereum", native: "ETH", explorer: "https://etherscan.io" },
+  8453: { id: 8453, slug: "base-mainnet", name: "Base", native: "ETH", explorer: "https://basescan.org" },
+  42161: { id: 42161, slug: "arb-mainnet", name: "Arbitrum", native: "ETH", explorer: "https://arbiscan.io" },
+  10: { id: 10, slug: "opt-mainnet", name: "Optimism", native: "ETH", explorer: "https://optimistic.etherscan.io" },
+  137: { id: 137, slug: "polygon-mainnet", name: "Polygon", native: "POL", explorer: "https://polygonscan.com" },
+  56: { id: 56, slug: "bnb-mainnet", name: "BNB Chain", native: "BNB", explorer: "https://bscscan.com" },
+}
+
+/** Resolve chain metadata; defaults to Ethereum when chainId is unknown. */
+export function chainInfo(chainId?: number): ChainInfo {
+  return (chainId && CHAINS[chainId]) || CHAINS[1]
+}
+
+/** Alchemy network slug for a chain id, honoring ALCHEMY_NETWORK as a default. */
+function networkSlug(chainId?: number): string {
+  if (chainId && CHAINS[chainId]) return CHAINS[chainId].slug
+  return process.env.ALCHEMY_NETWORK || "eth-mainnet"
+}
+
+function rpcUrl(network: string): string {
+  return `https://${network}.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
 }
 
 let rpcId = 1
-async function rpc<T = any>(method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(rpcUrl(), {
+async function rpc<T = any>(network: string, method: string, params: unknown[]): Promise<T> {
+  const res = await fetch(rpcUrl(network), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }),
@@ -70,11 +96,11 @@ interface TokenMeta {
   decimals: number
 }
 const metaCache = new Map<string, TokenMeta>()
-async function tokenMeta(contract: string): Promise<TokenMeta> {
-  const key = contract.toLowerCase()
+async function tokenMeta(network: string, contract: string): Promise<TokenMeta> {
+  const key = `${network}:${contract.toLowerCase()}`
   if (metaCache.has(key)) return metaCache.get(key)!
   try {
-    const m = await rpc<TokenMeta>("alchemy_getTokenMetadata", [contract])
+    const m = await rpc<TokenMeta>(network, "alchemy_getTokenMetadata", [contract])
     const meta = { symbol: m.symbol || "?", name: m.name || "Unknown Token", decimals: m.decimals ?? 18 }
     metaCache.set(key, meta)
     return meta
@@ -100,9 +126,10 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 }
 
 // The ERC-20 contracts a wallet currently holds (Alchemy enhanced API).
-async function getErc20Contracts(owner: string): Promise<string[]> {
+async function getErc20Contracts(network: string, owner: string): Promise<string[]> {
   try {
     const res = await rpc<{ tokenBalances: { contractAddress: string; tokenBalance: string }[] }>(
+      network,
       "alchemy_getTokenBalances",
       [owner, "erc20"],
     )
@@ -113,10 +140,9 @@ async function getErc20Contracts(owner: string): Promise<string[]> {
 }
 
 // The NFT contracts a wallet holds (Alchemy NFT API — separate base path).
-async function getNftContracts(owner: string): Promise<string[]> {
+async function getNftContracts(network: string, owner: string): Promise<string[]> {
   try {
     const key = process.env.ALCHEMY_API_KEY
-    const network = process.env.ALCHEMY_NETWORK || "eth-mainnet"
     const url = `https://${network}.g.alchemy.com/nft/v3/${key}/getContractsForOwner?owner=${owner}&pageSize=100`
     const res = await fetch(url)
     if (!res.ok) return []
@@ -129,12 +155,13 @@ async function getNftContracts(owner: string): Promise<string[]> {
 
 // Approval logs for ONE contract (address-scoped → Alchemy allows full history).
 async function logsForContract(
+  network: string,
   contract: string,
   topic0: string,
   ownerTopic: string,
 ): Promise<{ address: string; spender: string; block: number }[]> {
   try {
-    const logs: any[] = await rpc("eth_getLogs", [
+    const logs: any[] = await rpc(network, "eth_getLogs", [
       { address: contract, fromBlock: "0x0", toBlock: "latest", topics: [topic0, ownerTopic] },
     ])
     return logs.map((l: any) => ({
@@ -155,24 +182,25 @@ function classify(spender: string, unlimited: boolean, ageDays: number, verified
   return "low"
 }
 
-/** Real ERC-20 + NFT operator approvals for an address. */
-export async function getApprovalsLive(address: string): Promise<Approval[]> {
+/** Real ERC-20 + NFT operator approvals for an address on a given chain. */
+export async function getApprovalsLive(address: string, chainId?: number): Promise<Approval[]> {
   if (!isAddress(address)) throw new Error("invalid address")
+  const network = networkSlug(chainId)
   const ownerTopic = "0x" + pad32(address)
 
   // Discover the wallet's token & NFT contracts, then scan each contract's
   // approval logs individually (address-scoped queries are allowed full-range).
   const [latest, erc20Contracts, nftContracts] = await Promise.all([
-    rpc<string>("eth_blockNumber", []).then((h) => parseInt(h, 16)),
-    getErc20Contracts(address),
-    getNftContracts(address),
+    rpc<string>(network, "eth_blockNumber", []).then((h) => parseInt(h, 16)),
+    getErc20Contracts(network, address),
+    getNftContracts(network, address),
   ])
 
   const erc20Logs = (
-    await mapLimit(erc20Contracts.slice(0, 80), 6, (c) => logsForContract(c, APPROVAL_TOPIC, ownerTopic))
+    await mapLimit(erc20Contracts.slice(0, 80), 6, (c) => logsForContract(network, c, APPROVAL_TOPIC, ownerTopic))
   ).flat()
   const nftLogs = (
-    await mapLimit(nftContracts.slice(0, 60), 6, (c) => logsForContract(c, APPROVAL_FOR_ALL_TOPIC, ownerTopic))
+    await mapLimit(nftContracts.slice(0, 60), 6, (c) => logsForContract(network, c, APPROVAL_FOR_ALL_TOPIC, ownerTopic))
   ).flat()
 
   // Dedup to the latest log per (contract, spender).
@@ -192,10 +220,10 @@ export async function getApprovalsLive(address: string): Promise<Approval[]> {
       if (p.kind === "erc20") {
         // Read current allowance(owner, spender).
         const data = ALLOWANCE_SELECTOR + pad32(address) + pad32(p.spender)
-        const raw = await rpc<string>("eth_call", [{ to: p.address, data }, "latest"])
+        const raw = await rpc<string>(network, "eth_call", [{ to: p.address, data }, "latest"])
         const allowance = BigInt(raw === "0x" ? "0x0" : raw)
         if (allowance === 0n) return null // revoked / spent — not a live approval
-        const meta = await tokenMeta(p.address)
+        const meta = await tokenMeta(network, p.address)
         const unlimited = allowance >= UNLIMITED_THRESHOLD
         const ageDays = Math.max(0, Math.floor((latest - p.block) / BLOCKS_PER_DAY))
         const verified = p.spender in KNOWN_SPENDERS
@@ -218,9 +246,9 @@ export async function getApprovalsLive(address: string): Promise<Approval[]> {
       } else {
         // NFT operator approval — read isApprovedForAll(owner, operator).
         const data = IS_APPROVED_FOR_ALL_SELECTOR + pad32(address) + pad32(p.spender)
-        const raw = await rpc<string>("eth_call", [{ to: p.address, data }, "latest"])
+        const raw = await rpc<string>(network, "eth_call", [{ to: p.address, data }, "latest"])
         if (BigInt(raw === "0x" ? "0x0" : raw) !== 1n) return null // revoked
-        const meta = await tokenMeta(p.address)
+        const meta = await tokenMeta(network, p.address)
         const ageDays = Math.max(0, Math.floor((latest - p.block) / BLOCKS_PER_DAY))
         const verified = p.spender in KNOWN_SPENDERS
         return {
@@ -251,17 +279,74 @@ function rank(r: Approval["risk"]): number {
   return { critical: 3, high: 2, medium: 1, low: 0 }[r]
 }
 
-async function countTokens(address: string): Promise<number> {
+async function countTokens(network: string, address: string): Promise<number> {
   try {
-    const res = await rpc<{ tokenBalances: { tokenBalance: string }[] }>("alchemy_getTokenBalances", [address])
+    const res = await rpc<{ tokenBalances: { tokenBalance: string }[] }>(network, "alchemy_getTokenBalances", [address])
     return res.tokenBalances.filter((t) => t.tokenBalance && BigInt(t.tokenBalance) > 0n).length
   } catch {
     return 0
   }
 }
 
-/** Real wallet health for an address, computed from live approvals. */
-export async function getWalletHealthLive(address: string): Promise<WalletHealth> {
-  const [approvals, tokenCount] = await Promise.all([getApprovalsLive(address), countTokens(address)])
+export interface LiveAssetChange {
+  direction: "out" | "in"
+  asset: string
+  amount: string
+  note: string
+}
+
+/**
+ * Real transaction simulation via Alchemy `simulateAssetChanges` — returns the
+ * actual asset deltas the tx would produce. null when unconfigured or on error
+ * (caller falls back to the heuristic simulation).
+ */
+export async function simulateAssetChangesLive(
+  tx: { from?: string; to?: string; value?: string; data?: string },
+  chainId?: number,
+): Promise<{ changes: LiveAssetChange[]; gasUsed?: string } | null> {
+  if (!isOnchainConfigured() || !isAddress(tx.from) || !isAddress(tx.to)) return null
+  const network = networkSlug(chainId)
+  // Alchemy expects a hex value quantity.
+  let value = "0x0"
+  try {
+    if (tx.value && tx.value !== "0") value = "0x" + BigInt(tx.value).toString(16)
+  } catch {
+    /* keep 0x0 */
+  }
+  try {
+    const res = await rpc<{
+      changes?: { assetType: string; from: string; to: string; amount?: string; symbol?: string; name?: string }[]
+      gasUsed?: string
+      error?: any
+    }>(network, "alchemy_simulateAssetChanges", [{ from: tx.from, to: tx.to, value, data: tx.data || "0x" }])
+    if (!res?.changes) return null
+    const from = tx.from!.toLowerCase()
+    const changes: LiveAssetChange[] = res.changes.map((c) => ({
+      direction: c.from?.toLowerCase() === from ? "out" : "in",
+      asset: c.symbol || c.name || c.assetType || "asset",
+      amount: c.amount ?? "?",
+      note: c.from?.toLowerCase() === from ? `To ${c.to?.slice(0, 8)}…` : `From ${c.from?.slice(0, 8)}…`,
+    }))
+    return { changes, gasUsed: res.gasUsed }
+  } catch {
+    return null
+  }
+}
+
+/** Public token metadata lookup (symbol/name/decimals) for a given chain. */
+export async function getTokenMetaLive(
+  contract: string,
+  chainId?: number,
+): Promise<{ symbol: string; name: string; decimals: number }> {
+  return tokenMeta(networkSlug(chainId), contract)
+}
+
+/** Real wallet health for an address on a given chain, from live approvals. */
+export async function getWalletHealthLive(address: string, chainId?: number): Promise<WalletHealth> {
+  const network = networkSlug(chainId)
+  const [approvals, tokenCount] = await Promise.all([
+    getApprovalsLive(address, chainId),
+    countTokens(network, address),
+  ])
   return computeWalletHealth(address, approvals, { tokenCount })
 }
