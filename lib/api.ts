@@ -40,7 +40,7 @@ async function get<T>(url: string): Promise<T> {
 export const api = {
   analyze: (body: { data?: string; to?: string; domain?: string; address?: string }) =>
     post<AnalysisResult>("/api/analyze", body),
-  simulate: (body: { data?: string; to?: string; from?: string; domain?: string; address?: string }) =>
+  simulate: (body: { data?: string; to?: string; from?: string; domain?: string; address?: string; chainId?: number }) =>
     post<SimulationReport>("/api/simulate", body),
   simulateSample: () => get<SimulationReport>("/api/simulate"),
   copilot: (body: { message: string; data?: string; domain?: string; walletAddress?: string }) =>
@@ -48,14 +48,24 @@ export const api = {
   decode: (body: { data: string; to?: string; value?: string; chainId?: number }) =>
     post<{ decode: string; signatures: string[]; backend: string; selector: string | null }>("/api/decode", body),
   // Real on-chain wallet health for a connected address (via Alchemy).
-  wallet: (address: string) => get<LiveWallet>(`/api/wallet?address=${address}`),
-  approvals: (address: string) => get<LiveApprovals>(`/api/approvals?address=${address}`),
+  wallet: (address: string, chainId?: number) =>
+    get<LiveWallet>(`/api/wallet?address=${address}${chainId ? `&chainId=${chainId}` : ""}`),
+  approvals: (address: string, chainId?: number) =>
+    get<LiveApprovals>(`/api/approvals?address=${address}${chainId ? `&chainId=${chainId}` : ""}`),
   revoke: (body: { token?: string; spender: string }) =>
     post<{ revoked: boolean; calldata: string }>("/api/approvals", body),
   threats: () => get<{ threats: FeedThreat[]; stats: FeedStats }>("/api/threats"),
   searchThreats: (q: string) =>
     get<{ results: FeedThreat[]; stats: FeedStats }>(`/api/threats?q=${encodeURIComponent(q)}`),
   domain: (domain: string) => get<DomainVerdict>(`/api/domains?domain=${encodeURIComponent(domain)}`),
+  // Contract reputation (Etherscan V2) for a contract on a given chain.
+  reputation: (address: string, chainId?: number) =>
+    get<{ configured: boolean; verified: boolean; name?: string; address: string; chainId: number }>(
+      `/api/reputation?address=${address}${chainId ? `&chainId=${chainId}` : ""}`,
+    ),
+  // Submit a crowdsourced threat report.
+  report: (body: { type: "domain" | "address"; value: string; reason?: string }) =>
+    post<{ recorded: boolean; reason?: string }>("/api/report", body),
   // Recall a wallet's stored scan/threat history from DynamoDB.
   history: (address: string, type?: "scan" | "threat") =>
     get<LiveHistory>(`/api/history?address=${address}${type ? `&type=${type}` : ""}`),
