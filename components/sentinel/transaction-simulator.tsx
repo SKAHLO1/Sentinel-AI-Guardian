@@ -33,8 +33,9 @@ const verdictMeta: Record<string, { label: string; color: string }> = {
 }
 
 export function TransactionSimulator() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [calldata, setCalldata] = useState(SAMPLE_CALLDATA)
+  const [toAddr, setToAddr] = useState("")
   const [report, setReport] = useState<SimulationReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -60,9 +61,16 @@ export function TransactionSimulator() {
     setLoading(true)
     setError(null)
     try {
-      // Passing the connected address persists the result to scan history.
+      // With a contract address + connected wallet we get a REAL on-chain
+      // asset-change simulation; otherwise the heuristic report.
       const res = data
-        ? await api.simulate({ data, address: address ?? undefined })
+        ? await api.simulate({
+            data,
+            to: toAddr.trim() || undefined,
+            from: address ?? undefined,
+            address: address ?? undefined,
+            chainId: chainId ?? undefined,
+          })
         : await api.simulateSample()
       setReport(res)
     } catch (e) {
@@ -98,6 +106,13 @@ export function TransactionSimulator() {
           rows={3}
           placeholder="0x095ea7b3…"
           className="w-full bg-black/30 border border-white/[0.06] rounded-xl p-3 font-mono text-[11px] text-[#4F9CF9] break-all resize-none focus:outline-none focus:border-[#4F9CF9]/40"
+        />
+        <input
+          value={toAddr}
+          onChange={(e) => setToAddr(e.target.value)}
+          spellCheck={false}
+          placeholder="Contract address (optional — enables real asset-change simulation)"
+          className="w-full mt-2 bg-black/30 border border-white/[0.06] rounded-xl px-3 py-2 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[#4F9CF9]/40"
         />
         <div className="flex items-center gap-2 mt-3">
           <Button
@@ -166,6 +181,14 @@ export function TransactionSimulator() {
               </div>
 
               {/* Asset changes */}
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Asset Changes</span>
+                {report.live ? (
+                  <span className="text-[9px] font-bold text-[#22C55E] bg-[#22C55E]/10 border border-[#22C55E]/25 px-1.5 py-0.5 rounded-full">● LIVE SIMULATION</span>
+                ) : (
+                  <span className="text-[9px] font-medium text-muted-foreground bg-white/[0.04] border border-white/[0.06] px-1.5 py-0.5 rounded-full">Estimated</span>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 {report.assetChanges.map((a, i) => (
                   <div
