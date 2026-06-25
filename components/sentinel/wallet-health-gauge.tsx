@@ -7,15 +7,15 @@ import { useWallet } from "@/lib/wallet-context"
 import { ConnectPrompt, ProviderPrompt, LoadingState } from "@/components/sentinel/empty-states"
 
 export function WalletHealthGauge() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [health, setHealth] = useState<LiveWallet | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!address) { setHealth(null); return }
     setLoading(true)
-    api.wallet(address).then(setHealth).catch(() => setHealth(null)).finally(() => setLoading(false))
-  }, [address])
+    api.wallet(address, chainId ?? undefined).then(setHealth).catch(() => setHealth(null)).finally(() => setLoading(false))
+  }, [address, chainId])
 
   if (!address) return <ConnectPrompt label="Connect your wallet to see your live health score." />
   if (loading && !health) return <LoadingState />
