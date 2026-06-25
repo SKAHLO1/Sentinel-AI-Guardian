@@ -6,13 +6,13 @@ import { api, type LiveWallet } from "@/lib/api"
 import { useWallet } from "@/lib/wallet-context"
 
 export function DashboardStats() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [w, setW] = useState<LiveWallet | null>(null)
 
   useEffect(() => {
     if (!address) { setW(null); return }
-    api.wallet(address).then(setW).catch(() => setW(null))
-  }, [address])
+    api.wallet(address, chainId ?? undefined).then(setW).catch(() => setW(null))
+  }, [address, chainId])
 
   const note = !address ? "Connect wallet" : w && !w.configured ? "Configure Alchemy" : null
   const v = (n?: number) => (note || n === undefined ? "—" : String(n))
