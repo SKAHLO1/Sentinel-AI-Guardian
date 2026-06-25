@@ -8,7 +8,7 @@ export default function ThreatsPage() {
   return (
     <div className="min-h-screen bg-background">
       <Topbar title="Threat Intelligence Feed" subtitle="Live feed of phishing domains, drainers and scam wallets" />
-      <div className="pt-14 p-4 md:p-6 space-y-5">
+      <div className="pt-14 px-4 md:px-6 pb-6 space-y-5">
         <SecurityTools />
         <ThreatIntelligence />
       </div>
