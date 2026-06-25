@@ -9,15 +9,15 @@ import { ConnectPrompt, ProviderPrompt, LoadingState } from "@/components/sentin
 const scoreColor = (score: number) => (score >= 80 ? "#22C55E" : score >= 60 ? "#F59E0B" : "#EF4444")
 
 export function WalletsPage() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [health, setHealth] = useState<LiveWallet | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!address) { setHealth(null); return }
     setLoading(true)
-    api.wallet(address).then(setHealth).catch(() => setHealth(null)).finally(() => setLoading(false))
-  }, [address])
+    api.wallet(address, chainId ?? undefined).then(setHealth).catch(() => setHealth(null)).finally(() => setLoading(false))
+  }, [address, chainId])
 
   if (!address) return <ConnectPrompt label="Connect a wallet to monitor it in real time." />
   if (loading && !health) return <LoadingState />
