@@ -4,20 +4,27 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react"
 import iconUrl from "data-base64:~assets/icon.png"
 
-import { API_BASE, connectWallet, disconnectWallet, getConnectedAddress, guardianApi } from "~lib/api"
+import { API_BASE, connectWallet, disconnectWallet, getConnectedWallet, guardianApi } from "~lib/api"
 
 type Tab = "home" | "wallet" | "approvals" | "threats" | "copilot" | "settings"
+
+// Minimal chain registry for display (mirrors the backend CHAINS map).
+const CHAIN_NAMES: Record<number, string> = {
+  1: "Ethereum", 8453: "Base", 42161: "Arbitrum", 10: "Optimism", 137: "Polygon", 56: "BNB Chain",
+}
+const chainName = (id: number | null | undefined) => (id ? CHAIN_NAMES[id] ?? `Chain ${id}` : "")
 
 // --- Wallet connection state, shared across all tabs --------------------
 interface WalletCtx {
   address: string | null | undefined // undefined = still loading
+  chainId: number | null
   connecting: boolean
   error: string | null
   connect: () => Promise<void>
   disconnect: () => void
 }
 const WalletContext = createContext<WalletCtx>({
-  address: undefined, connecting: false, error: null, connect: async () => {}, disconnect: () => {},
+  address: undefined, chainId: null, connecting: false, error: null, connect: async () => {}, disconnect: () => {},
 })
 const useW = () => useContext(WalletContext)
 
@@ -34,22 +41,23 @@ const sevColor: Record<string, string> = {
 export default function Popup() {
   const [tab, setTab] = useState<Tab>("home")
   const [address, setAddress] = useState<string | null | undefined>(undefined)
+  const [chainId, setChainId] = useState<number | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { getConnectedAddress().then(setAddress) }, [])
+  useEffect(() => { getConnectedWallet().then((w) => { setAddress(w.address); setChainId(w.chainId) }) }, [])
 
   async function connect() {
     setConnecting(true); setError(null)
     const res = await connectWallet()
-    if (res.address) setAddress(res.address)
+    if (res.address) { setAddress(res.address); if (res.chainId) setChainId(res.chainId) }
     else setError(res.error ?? "Connection failed")
     setConnecting(false)
   }
-  function disconnect() { setAddress(null); void disconnectWallet() }
+  function disconnect() { setAddress(null); setChainId(null); void disconnectWallet() }
 
   return (
-    <WalletContext.Provider value={{ address, connecting, error, connect, disconnect }}>
+    <WalletContext.Provider value={{ address, chainId, connecting, error, connect, disconnect }}>
       <div style={s.root}>
         <Header />
         <div style={s.body}>
@@ -67,7 +75,7 @@ export default function Popup() {
 }
 
 function Header() {
-  const { address, connect, disconnect, connecting } = useW()
+  const { address, chainId, connect, disconnect, connecting } = useW()
   return (
     <div style={s.header}>
       <img src={iconUrl} alt="SentinelAI Guardian" style={{ width: 30, height: 30, borderRadius: 8 }} />
@@ -75,7 +83,12 @@ function Header() {
         <div style={{ fontWeight: 700, fontSize: 14 }}>SentinelAI Guardian</div>
         <div style={{ fontSize: 10, color: C.muted }}>The AI Antivirus for Web3</div>
       </div>
-      <div style={{ marginLeft: "auto" }}>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+        {address && chainId ? (
+          <span style={{ fontSize: 9, color: C.blue, background: `${C.blue}14`, border: `1px solid ${C.blue}33`, borderRadius: 999, padding: "3px 7px", fontWeight: 600 }}>
+            {chainName(chainId)}
+          </span>
+        ) : null}
         {address ? (
           <button onClick={disconnect} title="Disconnect" style={s.addrPill}>
             <span style={{ width: 6, height: 6, borderRadius: 999, background: C.green, display: "inline-block" }} />
@@ -170,6 +183,9 @@ function Home() {
 function useConnectedAddress() {
   return useW().address
 }
+function useChainId() {
+  return useW().chainId ?? undefined
+}
 
 function NoWallet() {
   const { connect, connecting, error } = useW()
@@ -200,20 +216,22 @@ function shortAddr(a: string) { return `${a.slice(0, 6)}…${a.slice(-4)}` }
 // --- Wallet Health (real, via Alchemy) ----------------------------------
 function WalletHealth() {
   const address = useConnectedAddress()
+  const chainId = useChainId()
   const [w, setW] = useState<any>(null)
   const [state, setState] = useState<"loading" | "ready" | "no-provider" | "error">("loading")
 
   useEffect(() => {
     if (address === undefined) return
     if (address === null) { setState("ready"); return }
-    guardianApi.walletLive(address)
+    setState("loading")
+    guardianApi.walletLive(address, chainId)
       .then((r) => {
         if (!r.configured) return setState("no-provider")
         if (r.error) return setState("error")
         setW(r); setState("ready")
       })
       .catch(() => setState("error"))
-  }, [address])
+  }, [address, chainId])
 
   if (address === undefined || state === "loading") return <Loading />
   if (address === null) return <NoWallet />
@@ -251,20 +269,22 @@ function WalletHealth() {
 // --- Approvals (real, via Alchemy) --------------------------------------
 function Approvals() {
   const address = useConnectedAddress()
+  const chainId = useChainId()
   const [list, setList] = useState<any[] | null>(null)
   const [state, setState] = useState<"loading" | "ready" | "no-provider" | "error">("loading")
 
   useEffect(() => {
     if (address === undefined) return
     if (address === null) { setState("ready"); return }
-    guardianApi.approvalsLive(address)
+    setState("loading")
+    guardianApi.approvalsLive(address, chainId)
       .then((r) => {
         if (!r.configured) return setState("no-provider")
         if (r.error) return setState("error")
         setList(r.approvals); setState("ready")
       })
       .catch(() => setState("error"))
-  }, [address])
+  }, [address, chainId])
 
   if (address === undefined || state === "loading") return <Loading />
   if (address === null) return <NoWallet />
