@@ -34,10 +34,16 @@ const SEV: Record<string, string> = {
   info: "#6B7A8D",
 }
 
-function decode(method: string, params: unknown[]): { data?: string; to?: string; from?: string } {
+function decode(method: string, params: unknown[]): { data?: string; to?: string; from?: string; typedData?: unknown } {
   if (method === "eth_sendTransaction" && params[0] && typeof params[0] === "object") {
     const tx = params[0] as { data?: string; to?: string; from?: string }
     return { data: tx.data, to: tx.to, from: tx.from }
+  }
+  // signTypedData: params are [address, typedDataJSON]; the typed data is the
+  // non-address argument (a JSON string or object).
+  if (method.startsWith("eth_signTypedData")) {
+    const td = params.find((p) => typeof p === "object" || (typeof p === "string" && (p as string).trim().startsWith("{")))
+    return { typedData: td }
   }
   // personal_sign / eth_sign carry the message as a hex param.
   const hex = params.find((p) => typeof p === "string" && (p as string).startsWith("0x")) as string | undefined
@@ -50,6 +56,12 @@ export default function GuardianOverlay() {
   const [loading, setLoading] = useState(false)
   const [aiNote, setAiNote] = useState<string | null>(null)
   const [aiDecode, setAiDecode] = useState<string | null>(null)
+  const [capOpen, setCapOpen] = useState(false)
+  const [capInput, setCapInput] = useState("")
+  const [capBusy, setCapBusy] = useState(false)
+  const [capError, setCapError] = useState<string | null>(null)
+  const [assetChanges, setAssetChanges] = useState<{ direction: string; asset: string; amount: string; note: string }[] | null>(null)
+  const [reported, setReported] = useState(false)
   const reviewRef = useRef<Review | null>(null)
 
   useEffect(() => {
@@ -68,6 +80,11 @@ export default function GuardianOverlay() {
         chrome.runtime.sendMessage({ type: "setAccount", address: msg.address }).catch(() => {})
         return
       }
+      // Forward the connected chain so on-chain reads use the right network.
+      if (msg.__sentinel === "chain" && msg.chainId) {
+        chrome.runtime.sendMessage({ type: "setChain", chainId: msg.chainId }).catch(() => {})
+        return
+      }
 
       if (msg.__sentinel !== "intercept") return
       const r: Review = { id: msg.id, method: msg.method, params: msg.params ?? [], origin: msg.origin }
@@ -76,11 +93,16 @@ export default function GuardianOverlay() {
       setResult(null)
       setAiNote(null)
       setAiDecode(null)
+      setCapOpen(false)
+      setCapInput("")
+      setCapError(null)
+      setAssetChanges(null)
+      setReported(false)
       setLoading(true)
 
-      const { data, to, from } = decode(r.method, r.params)
+      const { data, to, from, typedData } = decode(r.method, r.params)
       chrome.runtime
-        .sendMessage({ type: "analyze", payload: { data, to, from, method: r.method, domain: hostOf(r.origin) } })
+        .sendMessage({ type: "analyze", payload: { data, to, from, typedData, method: r.method, domain: hostOf(r.origin) } })
         .then((res: AnalysisResult) => {
           if (reviewRef.current?.id !== r.id) return
           setResult(res)
@@ -91,18 +113,83 @@ export default function GuardianOverlay() {
         })
         .catch(() => {})
         .finally(() => setLoading(false))
+
+      // In parallel: a real on-chain simulation of asset changes (eth_sendTransaction).
+      if (r.method === "eth_sendTransaction" && to) {
+        chrome.runtime
+          .sendMessage({ type: "simulate", payload: { data, to, from } })
+          .then((sim: { live?: boolean; assetChanges?: any[] }) => {
+            if (reviewRef.current?.id === r.id && sim?.live && sim.assetChanges?.length) {
+              setAssetChanges(sim.assetChanges)
+            }
+          })
+          .catch(() => {})
+      }
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
   }, [])
 
-  function decide(decision: "approve" | "reject") {
-    if (review) window.postMessage({ __sentinel: "decision", id: review.id, decision }, "*")
+  function reset() {
     setReview(null)
     setResult(null)
     setAiDecode(null)
     setAiNote(null)
+    setCapOpen(false)
+    setCapInput("")
+    setCapError(null)
+    setAssetChanges(null)
     reviewRef.current = null
+  }
+
+  function decide(decision: "approve" | "reject") {
+    if (review) window.postMessage({ __sentinel: "decision", id: review.id, decision }, "*")
+    reset()
+  }
+
+  async function reportSite() {
+    if (!review || reported) return
+    setReported(true) // optimistic
+    try {
+      await chrome.runtime.sendMessage({ type: "report", payload: { type: "domain", value: hostOf(review.origin), reason: "Reported from transaction overlay" } })
+    } catch {
+      /* optimistic — keep it marked */
+    }
+  }
+
+  // Spending-cap rewrite: replace an unlimited approval amount with a capped one
+  // and submit the modified calldata instead of the original.
+  async function applyCap() {
+    if (!review || !result?.decoded) return
+    const tx = review.params[0] as { to?: string; data?: string }
+    const human = capInput.trim()
+    if (!tx?.data || !human || isNaN(Number(human)) || Number(human) <= 0) {
+      setCapError("Enter a valid amount")
+      return
+    }
+    setCapBusy(true)
+    setCapError(null)
+    try {
+      // Fetch token decimals to convert the human amount to on-chain units.
+      const meta = (await chrome.runtime.sendMessage({
+        type: "token",
+        payload: { address: tx.to, chainId: undefined },
+      })) as { decimals?: number }
+      const decimals = meta?.decimals ?? 18
+      const [whole, frac = ""] = human.split(".")
+      const units = BigInt((whole.replace(/\D/g, "") || "0") + (frac + "0".repeat(decimals)).slice(0, decimals))
+      const amountHex = units.toString(16).padStart(64, "0")
+      // calldata = 0x + selector(8) + spender(64) + amount(64); replace amount.
+      const clean = tx.data.replace(/^0x/, "")
+      const newData = "0x" + clean.slice(0, 8 + 64) + amountHex
+      const modifiedParams = [{ ...tx, data: newData }, ...review.params.slice(1)]
+      window.postMessage({ __sentinel: "decision", id: review.id, decision: "modify", modifiedParams }, "*")
+      reset()
+    } catch (e) {
+      setCapError("Couldn't set cap — try Reject instead.")
+    } finally {
+      setCapBusy(false)
+    }
   }
 
   async function runAiDecode(r: Review, data?: string, to?: string) {
@@ -168,6 +255,21 @@ export default function GuardianOverlay() {
 
         {result?.summary && <p style={S.summary}>{result.summary}</p>}
 
+        {/* Real on-chain simulation — actual asset changes */}
+        {assetChanges && assetChanges.length > 0 && (
+          <div style={{ ...S.ai, background: "#8B5CF60d", borderColor: "#8B5CF633" }}>
+            <div style={{ ...S.aiLabel, color: "#8B5CF6" }}>Simulated balance changes</div>
+            {assetChanges.slice(0, 6).map((c, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0" }}>
+                <span style={{ color: c.direction === "out" ? "#EF4444" : "#22C55E", fontWeight: 600 }}>
+                  {c.direction === "out" ? "−" : "+"} {c.amount} {c.asset}
+                </span>
+                <span style={{ color: "#8B949E", fontSize: 10 }}>{c.note}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={S.signals}>
           {loading && <div style={S.muted}>Running simulation, threat-intel & AI analysis…</div>}
           {!loading && result?.signals.length === 0 && (
@@ -182,6 +284,38 @@ export default function GuardianOverlay() {
             </div>
           ))}
         </div>
+
+        {/* Spending-cap rewrite — only for unlimited ERC-20 approvals */}
+        {result?.decoded?.isUnlimitedApproval && review.method === "eth_sendTransaction" && (
+          <div style={{ ...S.ai, background: "#22C55E0d", borderColor: "#22C55E33" }}>
+            <div style={{ ...S.aiLabel, color: "#22C55E" }}>Safer: set a spending cap</div>
+            {!capOpen ? (
+              <button style={{ ...S.btn, ...S.capBtn, width: "100%", height: 34 }} onClick={() => setCapOpen(true)}>
+                Approve an exact amount instead
+              </button>
+            ) : (
+              <div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    autoFocus
+                    value={capInput}
+                    onChange={(e) => setCapInput(e.target.value)}
+                    placeholder="e.g. 100"
+                    inputMode="decimal"
+                    style={S.capInput}
+                  />
+                  <button style={{ ...S.btn, ...S.capBtn, width: 130, height: 34 }} disabled={capBusy} onClick={applyCap}>
+                    {capBusy ? "Setting…" : "Approve cap"}
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: "#8B949E", marginTop: 6 }}>
+                  Submits an approval for exactly this many tokens instead of unlimited.
+                </div>
+                {capError && <div style={{ fontSize: 10, color: "#EF4444", marginTop: 4 }}>{capError}</div>}
+              </div>
+            )}
+          </div>
+        )}
 
         {aiDecode && (
           <div style={{ ...S.ai, background: "#4F9CF90d", borderColor: "#4F9CF933" }}>
@@ -215,7 +349,16 @@ export default function GuardianOverlay() {
             Proceed Anyway
           </button>
         </div>
-        <div style={S.footer}>SentinelAI never auto-signs. You make the final decision.</div>
+        <div style={S.footer}>
+          SentinelAI never auto-signs. You make the final decision.
+          {" · "}
+          <span
+            style={{ color: reported ? "#22C55E" : "#8B949E", cursor: reported ? "default" : "pointer", textDecoration: reported ? "none" : "underline" }}
+            onClick={reportSite}
+          >
+            {reported ? "✓ Reported" : "⚑ Report this site"}
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -262,5 +405,7 @@ const S: Record<string, React.CSSProperties> = {
   proceed: { background: "transparent", color: "#22C55E", borderColor: "#22C55E55" },
   explainBtn: { background: "rgba(255,153,0,0.1)", color: "#FF9900", borderColor: "#FF990055" },
   decodeBtn: { background: "rgba(79,156,249,0.1)", color: "#4F9CF9", borderColor: "#4F9CF955" },
+  capBtn: { background: "#22C55E", color: "#06210f", border: "none", fontSize: 12 },
+  capInput: { flex: 1, background: "#0D1117", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "0 10px", color: "#E6EDF3", fontSize: 13, outline: "none" },
   footer: { fontSize: 10, color: "#6B7280", textAlign: "center", marginTop: 12 },
 }
