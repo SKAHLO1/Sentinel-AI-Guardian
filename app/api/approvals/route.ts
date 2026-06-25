@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
   const limited = await enforceRateLimit(req, "approvals", 30, 60) // 30/min (Alchemy cost)
   if (limited) return limited
   const address = req.nextUrl.searchParams.get("address")
+  const chainId = Number(req.nextUrl.searchParams.get("chainId")) || undefined
 
   if (!isOnchainConfigured()) {
     return NextResponse.json({ configured: false, reason: "no-alchemy-key", approvals: [] })
@@ -18,8 +19,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ configured: true, connected: false, reason: "no-address", approvals: [] })
   }
   try {
-    const approvals = await getApprovalsLive(address)
-    return NextResponse.json({ configured: true, connected: true, approvals })
+    const approvals = await getApprovalsLive(address, chainId)
+    return NextResponse.json({ configured: true, connected: true, chainId: chainId ?? 1, approvals })
   } catch (err) {
     console.error("[/api/approvals] Alchemy error:", (err as Error).message)
     return NextResponse.json(

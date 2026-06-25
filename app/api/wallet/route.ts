@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
   const limited = await enforceRateLimit(req, "wallet", 30, 60) // 30/min (Alchemy cost)
   if (limited) return limited
   const address = req.nextUrl.searchParams.get("address")
+  const chainId = Number(req.nextUrl.searchParams.get("chainId")) || undefined
 
   if (!isOnchainConfigured()) {
     return NextResponse.json({ configured: false, reason: "no-alchemy-key" })
@@ -22,8 +23,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ configured: true, connected: false, reason: "no-address" })
   }
   try {
-    const health = await getWalletHealthLive(address)
-    return NextResponse.json({ configured: true, connected: true, ...health })
+    const health = await getWalletHealthLive(address, chainId)
+    return NextResponse.json({ configured: true, connected: true, chainId: chainId ?? 1, ...health })
   } catch (err) {
     console.error("[/api/wallet] Alchemy error:", (err as Error).message)
     return NextResponse.json(

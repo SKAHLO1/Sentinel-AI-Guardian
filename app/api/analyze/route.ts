@@ -3,6 +3,7 @@ import { analyzeTransaction } from "@/lib/engine/risk"
 import type { AnalysisRequest } from "@/lib/engine/types"
 import { putScanEvent, toScanEvent } from "@/lib/engine/db"
 import { enforceRateLimit } from "@/lib/rate-limit"
+import { getContractReputation, isReputationConfigured } from "@/lib/engine/reputation"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -18,6 +19,12 @@ export async function POST(req: NextRequest) {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+  // Enrich with contract reputation when configured (gated to contract calls
+  // so simple sends stay fast; no key ⇒ skipped entirely).
+  if (!body.reputation && isReputationConfigured() && body.to && body.data && body.data !== "0x") {
+    const rep = await getContractReputation(body.to, body.chainId).catch(() => null)
+    if (rep?.configured) body.reputation = { verified: rep.verified, name: rep.name }
   }
   const result = analyzeTransaction(body)
 

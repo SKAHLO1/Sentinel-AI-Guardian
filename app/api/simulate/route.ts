@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { simulate } from "@/lib/engine/simulate"
 import type { AnalysisRequest } from "@/lib/engine/types"
 import { putScanEvent, toScanEvent } from "@/lib/engine/db"
+import { simulateAssetChangesLive } from "@/lib/engine/onchain"
 
 // Sample calldata used when the simulator loads with no input (an unlimited
 // USDC approval to an unverified contract — the canonical drainer pattern).
@@ -22,6 +23,19 @@ export async function POST(req: NextRequest) {
   }
   const request = body.data ? body : SAMPLE
   const report = simulate(request)
+
+  // Upgrade to a REAL on-chain simulation (asset diffs) when we have a full tx
+  // and Alchemy is configured; otherwise the heuristic report stands.
+  if (request.from && request.to) {
+    const live = await simulateAssetChangesLive(
+      { from: request.from, to: request.to, value: request.value, data: request.data },
+      request.chainId,
+    ).catch(() => null)
+    if (live && live.changes.length) {
+      report.assetChanges = live.changes
+      report.live = true
+    }
+  }
 
   if (body.address) {
     void putScanEvent(
