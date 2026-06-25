@@ -31,16 +31,16 @@ function CustomTooltip({ active, payload }: TooltipProps) {
 }
 
 export function RiskTimeline() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [approvals, setApprovals] = useState<Approval[] | null>(null)
   const [configured, setConfigured] = useState(true)
 
   useEffect(() => {
     if (!address) { setApprovals(null); return }
-    api.approvals(address)
+    api.approvals(address, chainId ?? undefined)
       .then((r) => { setConfigured(r.configured); setApprovals(r.configured ? r.approvals : []) })
       .catch(() => setApprovals([]))
-  }, [address])
+  }, [address, chainId])
 
   if (!address) return <ConnectPrompt label="Connect your wallet to see your approval risk breakdown." />
   if (!configured) return <ProviderPrompt />

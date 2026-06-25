@@ -49,7 +49,7 @@ const tokenColors: Record<string, string> = {
 }
 
 export function ApprovalManager() {
-  const { address } = useWallet()
+  const { address, chainId } = useWallet()
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(false)
   const [configured, setConfigured] = useState(true)
@@ -60,14 +60,14 @@ export function ApprovalManager() {
   useEffect(() => {
     if (!address) { setRows([]); return }
     setLoading(true)
-    api.approvals(address)
+    api.approvals(address, chainId ?? undefined)
       .then((r) => {
         setConfigured(r.configured)
         setRows(r.configured ? r.approvals.map(toRow) : [])
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [address])
+  }, [address, chainId])
 
   if (!address) return <ConnectPrompt label="Connect your wallet to scan its real token approvals." />
   if (!configured) return <ProviderPrompt />
