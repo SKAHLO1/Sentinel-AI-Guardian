@@ -31,10 +31,25 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function put<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`${url} -> ${res.status}`)
   return res.json() as Promise<T>
+}
+
+export interface UserSettings {
+  toggles?: Record<string, boolean>
+  profile?: { email?: string; name?: string }
 }
 
 export const api = {
@@ -66,6 +81,11 @@ export const api = {
   // Submit a crowdsourced threat report.
   report: (body: { type: "domain" | "address"; value: string; reason?: string }) =>
     post<{ recorded: boolean; reason?: string }>("/api/report", body),
+  // Cross-device settings persisted in DynamoDB, keyed by wallet address.
+  getSettings: (address: string) =>
+    get<{ configured: boolean; settings: UserSettings | null }>(`/api/settings?address=${address}`),
+  saveSettings: (address: string, settings: UserSettings) =>
+    put<{ saved: boolean; reason?: string }>("/api/settings", { address, settings }),
   // Recall a wallet's stored scan/threat history from DynamoDB.
   history: (address: string, type?: "scan" | "threat") =>
     get<LiveHistory>(`/api/history?address=${address}${type ? `&type=${type}` : ""}`),

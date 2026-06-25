@@ -7,7 +7,7 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-background">
       <Topbar title="Settings" subtitle="Configure your SentinelAI security preferences" />
-      <div className="pt-14 p-6">
+      <div className="pt-14 p-4 md:p-6">
         <SettingsPage />
       </div>
     </div>
