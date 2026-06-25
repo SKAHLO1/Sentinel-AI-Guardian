@@ -21,7 +21,7 @@ export function LandingNav() {
       </div>
 
       <div className="flex items-center gap-2.5">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground text-xs h-8" asChild>
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground text-xs h-8 hidden sm:inline-flex" asChild>
           <Link href="/dashboard">Sign In</Link>
         </Button>
         <Button size="sm" className="bg-[#4F9CF9] hover:bg-[#3a87e8] text-[#0A0A0A] font-semibold text-xs h-8 px-4 transition-all" asChild>

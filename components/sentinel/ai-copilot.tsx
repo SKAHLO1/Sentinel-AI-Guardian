@@ -80,7 +80,7 @@ export function AICopilot() {
   return (
     <div className="flex h-[calc(100vh-56px)]">
       {/* Sidebar — conversation history */}
-      <div className="w-64 shrink-0 border-r border-white/[0.06] flex flex-col bg-[#0D1117]">
+      <div className="w-64 shrink-0 border-r border-white/[0.06] hidden md:flex flex-col bg-[#0D1117]">
         <div className="p-4 border-b border-white/[0.06]">
           <Button
             size="sm"

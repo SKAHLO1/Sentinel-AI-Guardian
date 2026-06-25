@@ -128,6 +128,35 @@ export async function queryScanEvents(
   return (res.Items ?? []) as ScanEvent[]
 }
 
+export interface UserSettings {
+  toggles?: Record<string, boolean>
+  profile?: { email?: string; name?: string }
+}
+
+/** Load a wallet's settings (stored in its own partition, separate from history). */
+export async function getSettings(address: string): Promise<UserSettings | null> {
+  if (!isDbConfigured() || !address) return null
+  const { GetCommand } = await import("@aws-sdk/lib-dynamodb")
+  const doc = await getDoc()
+  const res = await doc.send(
+    new GetCommand({ TableName: tableName(), Key: { pk: `SETTINGS#${address.toLowerCase()}`, sk: "v1" } }),
+  )
+  return (res.Item?.settings as UserSettings) ?? null
+}
+
+/** Persist a wallet's settings. */
+export async function putSettings(address: string, settings: UserSettings): Promise<void> {
+  if (!isDbConfigured() || !address) return
+  const { PutCommand } = await import("@aws-sdk/lib-dynamodb")
+  const doc = await getDoc()
+  await doc.send(
+    new PutCommand({
+      TableName: tableName(),
+      Item: { pk: `SETTINGS#${address.toLowerCase()}`, sk: "v1", settings, updatedAt: new Date().toISOString() },
+    }),
+  )
+}
+
 export interface ThreatReport {
   type: "domain" | "address"
   value: string

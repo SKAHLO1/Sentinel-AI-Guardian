@@ -1,7 +1,8 @@
 "use client"
 
-import { Wallet, LogOut, Loader2 } from "lucide-react"
+import { Wallet, LogOut, Loader2, Menu } from "lucide-react"
 import { useWallet } from "@/lib/wallet-context"
+import { useMobileNav } from "@/lib/mobile-nav"
 
 interface TopbarProps {
   title: string
@@ -14,16 +15,27 @@ const CHAIN_NAMES: Record<number, string> = {
 
 export function Topbar({ title, subtitle }: TopbarProps) {
   const { address, chainId, connect, disconnect, connecting, hasProvider } = useWallet()
+  const { setOpen } = useMobileNav()
   const chain = chainId ? CHAIN_NAMES[chainId] ?? `Chain ${chainId}` : null
 
   return (
-    <header className="fixed top-0 left-60 right-0 h-14 z-30 flex items-center justify-between px-6 bg-[#0A0A0A]/80 backdrop-blur-md border-b border-white/[0.06]">
-      <div>
-        <h1 className="text-sm font-semibold text-foreground">{title}</h1>
-        {subtitle && <p className="text-xs text-muted-foreground hidden md:block">{subtitle}</p>}
+    <header className="fixed top-0 left-0 md:left-60 right-0 h-14 z-30 flex items-center justify-between px-4 md:px-6 bg-[#0A0A0A]/80 backdrop-blur-md border-b border-white/[0.06]">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {/* Hamburger (mobile only) */}
+        <button
+          onClick={() => setOpen(true)}
+          className="md:hidden flex items-center justify-center w-8 h-8 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors shrink-0"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <div className="min-w-0">
+          <h1 className="text-sm font-semibold text-foreground truncate">{title}</h1>
+          {subtitle && <p className="text-xs text-muted-foreground hidden md:block truncate">{subtitle}</p>}
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3 shrink-0">
         {address ? (
           <div className="flex items-center gap-2">
             {chain && (
